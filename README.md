@@ -1,433 +1,232 @@
 # FWD Repaso General (Ejercicio de Reserva de Vuelos)
 
-### Paso 1: Inicialización del Proyecto
+### Paso 1: Crear el Proyecto en Django y Configurar MySQL
 
-1. **Crea el proyecto e instala dependencias**:
+1. **Crear un proyecto Django**:
    ```bash
-   mkdir my-api
-   cd my-api
-   npm init -y
-   npm install express sequelize mysql2 jsonwebtoken bcryptjs dotenv
-   npm install --save-dev sequelize-cli
+   django-admin startproject flight_reservation
+   cd flight_reservation
    ```
 
-2. **Inicializa Sequelize CLI**:
+2. **Crear una aplicación**:
    ```bash
-   npx sequelize-cli init
+   python manage.py startapp api
    ```
 
-   Esto creará la siguiente estructura de carpetas:
-   ```
-   ├── config
-   │   └── config.json
-   ├── models
-   │   └── index.js
-   ├── migrations
-   ├── seeders
+3. **Instalar las dependencias**:
+   - Asegúrate de tener instalados Django y MySQL.
+   ```bash
+   pip install django mysqlclient djangorestframework djangorestframework-jwt
    ```
 
-3. **Configura la base de datos** en `config/config.json` para conectar a MySQL:
-   ```json
-   {
-     "development": {
-       "username": "tu_usuario",
-       "password": "tu_contraseña",
-       "database": "nombre_bd",
-       "host": "127.0.0.1",
-       "dialect": "mysql"
-     }
+4. **Configurar la base de datos MySQL** en `settings.py`:
+   ```python
+   DATABASES = {
+       'default': {
+           'ENGINE': 'django.db.backends.mysql',
+           'NAME': 'nombre_bd',
+           'USER': 'tu_usuario',
+           'PASSWORD': 'tu_contraseña',
+           'HOST': 'localhost',
+           'PORT': '3306',
+       }
    }
    ```
 
-### Paso 2: Crear el Modelo y Migración de Usuario
+5. **Añadir las aplicaciones y configuraciones necesarias en `settings.py`**:
+   ```python
+   INSTALLED_APPS = [
+       'django.contrib.admin',
+       'django.contrib.auth',
+       'django.contrib.contenttypes',
+       'django.contrib.sessions',
+       'django.contrib.messages',
+       'django.contrib.staticfiles',
+       'rest_framework',
+       'api',  # Nuestra app
+   ]
 
-1. **Crea el modelo de `User`** con `sequelize-cli`:
+   REST_FRAMEWORK = {
+       'DEFAULT_AUTHENTICATION_CLASSES': (
+           'rest_framework_jwt.authentication.JSONWebTokenAuthentication',
+       ),
+   }
+   ```
+
+### Paso 2: Crear el Modelo de Usuario y Configurar JWT
+
+1. **Configurar JWT** en `settings.py`:
+   ```python
+   import datetime
+
+   JWT_AUTH = {
+       'JWT_SECRET_KEY': 'tu_clave_secreta',
+       'JWT_EXPIRATION_DELTA': datetime.timedelta(days=1),
+   }
+   ```
+
+2. **Configurar el modelo `User`** en `models.py`:
+   Django ya cuenta con un modelo `User`, así que podemos extenderlo para personalizarlo si es necesario.
+
+3. **Realizar la migración inicial** para crear las tablas:
    ```bash
-   npx sequelize-cli model:generate --name User --attributes username:string,email:string,password:string
+   python manage.py makemigrations
+   python manage.py migrate
    ```
 
-   Esto generará un archivo de modelo en `models/user.js` y una migración en `migrations/<timestamp>-create-user.js`.
+### Paso 3: Crear Modelos de Vuelo y Reservas
 
-2. **Modifica el archivo de migración** en `migrations/<timestamp>-create-user.js` para definir los campos de `User`:
-   ```javascript
-   'use strict';
-   module.exports = {
-     up: async (queryInterface, Sequelize) => {
-       await queryInterface.createTable('Users', {
-         id: {
-           allowNull: false,
-           autoIncrement: true,
-           primaryKey: true,
-           type: Sequelize.INTEGER
-         },
-         username: {
-           type: Sequelize.STRING,
-           allowNull: false,
-           unique: true
-         },
-         email: {
-           type: Sequelize.STRING,
-           allowNull: false,
-           unique: true
-         },
-         password: {
-           type: Sequelize.STRING,
-           allowNull: false
-         },
-         createdAt: {
-           allowNull: false,
-           type: Sequelize.DATE
-         },
-         updatedAt: {
-           allowNull: false,
-           type: Sequelize.DATE
-         }
-       });
-     },
-     down: async (queryInterface, Sequelize) => {
-       await queryInterface.dropTable('Users');
-     }
-   };
-   ```
+En `models.py` dentro de la aplicación `api`, define los modelos de `Flight` y `Reservation`:
 
-3. **Ejecuta la migración** para crear la tabla `Users`:
-   ```bash
-   npx sequelize-cli db:migrate
-   ```
+```python
+from django.db import models
+from django.contrib.auth.models import User
 
-### Paso 3: Configuración de JWT y Autenticación
+class Flight(models.Model):
+    origin = models.CharField(max_length=100)
+    destination = models.CharField(max_length=100)
+    departure_time = models.DateTimeField()
+    arrival_time = models.DateTimeField()
+    price = models.DecimalField(max_digits=10, decimal_places=2)
 
-1. **Configura las variables de entorno** en un archivo `.env`:
-   ```plaintext
-   JWT_SECRET=tu_clave_secreta
-   JWT_EXPIRES_IN=1d
-   ```
-
-2. **Crea el controlador de autenticación** en `controllers/authController.js`:
-   ```javascript
-   const jwt = require('jsonwebtoken');
-   const bcrypt = require('bcryptjs');
-   const { User } = require('../models');
-
-   exports.register = async (req, res) => {
-     try {
-       const { username, email, password } = req.body;
-       const hashedPassword = await bcrypt.hash(password, 10);
-       const user = await User.create({ username, email, password: hashedPassword });
-       res.json({ user });
-     } catch (error) {
-       res.status(500).json({ error: 'Error al registrar usuario' });
-     }
-   };
-
-   exports.login = async (req, res) => {
-     try {
-       const { email, password } = req.body;
-       const user = await User.findOne({ where: { email } });
-       if (!user || !(await bcrypt.compare(password, user.password))) {
-         return res.status(401).json({ error: 'Credenciales incorrectas' });
-       }
-       const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
-       res.json({ token });
-     } catch (error) {
-       res.status(500).json({ error: 'Error al iniciar sesión' });
-     }
-   };
-   ```
-
-3. **Crea el middleware de autenticación JWT** en `middlewares/authMiddleware.js`:
-   ```javascript
-   const jwt = require('jsonwebtoken');
-
-   const authenticate = (req, res, next) => {
-     const token = req.headers.authorization?.split(' ')[1];
-     if (!token) return res.status(401).json({ error: 'Token no proporcionado' });
-
-     try {
-       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-       req.userId = decoded.id;
-       next();
-     } catch (error) {
-       res.status(401).json({ error: 'Token inválido' });
-     }
-   };
-
-   module.exports = authenticate;
-   ```
-
-### Paso 4: Configuración de Rutas
-
-1. **Crea las rutas de autenticación** en `routes/auth.js`:
-   ```javascript
-   const express = require('express');
-   const authController = require('../controllers/authController');
-   const router = express.Router();
-
-   router.post('/register', authController.register);
-   router.post('/login', authController.login);
-
-   module.exports = router;
-   ```
-
-2. **Crea las rutas protegidas** en `routes/profile.js` y un controlador de perfil:
-   ```javascript
-   const express = require('express');
-   const authenticate = require('../middlewares/authMiddleware');
-   const { User } = require('../models');
-   const router = express.Router();
-
-   router.get('/', authenticate, async (req, res) => {
-     try {
-       const user = await User.findByPk(req.userId);
-       res.json({ user });
-     } catch (error) {
-       res.status(500).json({ error: 'Error al obtener perfil' });
-     }
-   });
-
-   module.exports = router;
-   ```
-
-### Paso 5: Configuración del Servidor
-
-1. **Configura el servidor** en `index.js`:
-   ```javascript
-   const express = require('express');
-   const authRoutes = require('./routes/auth');
-   const profileRoutes = require('./routes/profile');
-   const app = express();
-
-   app.use(express.json());
-   app.use('/auth', authRoutes);
-   app.use('/profile', profileRoutes);
-
-   const PORT = process.env.PORT || 3000;
-   app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
-   ```
-
-### Paso 6: Ejecuta y Prueba la API
-
-1. **Ejecuta el servidor**:
-   ```bash
-   node index.js
-   ```
-
-2. **Prueba los endpoints**:
-   - **Registro de usuario**:
-     ```plaintext
-     POST /auth/register
-     Body: { "username": "user1", "email": "user1@example.com", "password": "password123" }
-     ```
-   - **Inicio de sesión**:
-     ```plaintext
-     POST /auth/login
-     Body: { "email": "user1@example.com", "password": "password123" }
-     ```
-   - **Ruta protegida (perfil)**:
-     ```plaintext
-     GET /profile
-     Header: Authorization: Bearer <token_obtenido_en_login>
-     ```
-
-### Paso 7: Crear Otros Modelos y Migraciones
-
-1. **Modelo de Vuelo**:
-   Genera un modelo de vuelo (`Flight`) con `sequelize-cli`:
-   ```bash
-   npx sequelize-cli model:generate --name Flight --attributes origin:string,destination:string,departureTime:date,arrivalTime:date,price:decimal
-   ```
-
-   La estructura del modelo `Flight` en `models/flight.js` debería tener algo como esto:
-   ```javascript
-   'use strict';
-   const { Model } = require('sequelize');
-   module.exports = (sequelize, DataTypes) => {
-     class Flight extends Model {
-       static associate(models) {
-         Flight.hasMany(models.Reservation, { foreignKey: 'flightId' });
-       }
-     }
-     Flight.init({
-       origin: DataTypes.STRING,
-       destination: DataTypes.STRING,
-       departureTime: DataTypes.DATE,
-       arrivalTime: DataTypes.DATE,
-       price: DataTypes.DECIMAL
-     }, {
-       sequelize,
-       modelName: 'Flight',
-     });
-     return Flight;
-   };
-   ```
-
-3. **Modelo de Reserva**:
-   Genera un modelo de reserva (`Reservation`) que relaciona usuarios y vuelos:
-   ```bash
-   npx sequelize-cli model:generate --name Reservation --attributes userId:integer,flightId:integer,status:string
-   ```
-
-   La estructura del modelo `Reservation` en `models/reservation.js` debería verse así:
-   ```javascript
-   'use strict';
-   const { Model } = require('sequelize');
-   module.exports = (sequelize, DataTypes) => {
-     class Reservation extends Model {
-       static associate(models) {
-         Reservation.belongsTo(models.User, { foreignKey: 'userId' });
-         Reservation.belongsTo(models.Flight, { foreignKey: 'flightId' });
-       }
-     }
-     Reservation.init({
-       userId: DataTypes.INTEGER,
-       flightId: DataTypes.INTEGER,
-       status: DataTypes.STRING
-     }, {
-       sequelize,
-       modelName: 'Reservation',
-     });
-     return Reservation;
-   };
-   ```
-
-4. **Ejecuta las migraciones** para crear las tablas correspondientes en la base de datos:
-   ```bash
-   npx sequelize-cli db:migrate
-   ```
-
-### Paso 8: Controladores
-
-1. **Controlador de Vuelos** en `controllers/flightController.js`:
-   Este controlador permitirá listar vuelos y buscar vuelos por origen, destino o rango de fechas.
-
-   ```javascript
-   const { Flight } = require('../models');
-
-   exports.getAllFlights = async (req, res) => {
-     try {
-       const flights = await Flight.findAll();
-       res.json(flights);
-     } catch (error) {
-       res.status(500).json({ error: 'Error al obtener vuelos' });
-     }
-   };
-
-   exports.getFlightById = async (req, res) => {
-     try {
-       const flight = await Flight.findByPk(req.params.id);
-       if (!flight) return res.status(404).json({ error: 'Vuelo no encontrado' });
-       res.json(flight);
-     } catch (error) {
-       res.status(500).json({ error: 'Error al obtener el vuelo' });
-     }
-   };
-   ```
-
-2. **Controlador de Reservas** en `controllers/reservationController.js`:
-   Este controlador permitirá crear y gestionar reservas de vuelos.
-
-   ```javascript
-   const { Reservation, Flight } = require('../models');
-
-   exports.createReservation = async (req, res) => {
-     try {
-       const { flightId } = req.body;
-       const flight = await Flight.findByPk(flightId);
-
-       if (!flight) return res.status(404).json({ error: 'Vuelo no encontrado' });
-
-       const reservation = await Reservation.create({
-         userId: req.userId,
-         flightId,
-         status: 'confirmado'
-       });
-
-       res.json({ message: 'Reserva creada con éxito', reservation });
-     } catch (error) {
-       res.status(500).json({ error: 'Error al crear la reserva' });
-     }
-   };
-
-   exports.getReservationsByUser = async (req, res) => {
-     try {
-       const reservations = await Reservation.findAll({
-         where: { userId: req.userId },
-         include: [{ model: Flight }]
-       });
-       res.json(reservations);
-     } catch (error) {
-       res.status(500).json({ error: 'Error al obtener reservas' });
-     }
-   };
-   ```
-
-### Paso 9: Rutas
-
-1. **Rutas de Vuelos** en `routes/flight.js`:
-   ```javascript
-   const express = require('express');
-   const flightController = require('../controllers/flightController');
-   const router = express.Router();
-
-   router.get('/', flightController.getAllFlights);
-   router.get('/:id', flightController.getFlightById);
-
-   module.exports = router;
-   ```
-
-2. **Rutas de Reservas** en `routes/reservation.js`:
-   ```javascript
-   const express = require('express');
-   const reservationController = require('../controllers/reservationController');
-   const authenticate = require('../middlewares/authMiddleware');
-   const router = express.Router();
-
-   router.post('/', authenticate, reservationController.createReservation);
-   router.get('/', authenticate, reservationController.getReservationsByUser);
-
-   module.exports = router;
-   ```
-
-### Paso 10: Configuración del Servidor
-
-En el archivo principal `index.js`, agrega las rutas de vuelos y reservas junto con las rutas de autenticación:
-```javascript
-const express = require('express');
-const authRoutes = require('./routes/auth');
-const flightRoutes = require('./routes/flight');
-const reservationRoutes = require('./routes/reservation');
-const app = express();
-
-app.use(express.json());
-app.use('/auth', authRoutes);
-app.use('/flights', flightRoutes);
-app.use('/reservations', reservationRoutes);
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Servidor corriendo en el puerto ${PORT}`));
+class Reservation(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    flight = models.ForeignKey(Flight, on_delete=models.CASCADE)
+    status = models.CharField(max_length=20, default='confirmado')
 ```
 
-### Paso 11: Pruebas de la API
+Ejecuta migraciones para estos modelos:
 
-1. **Vuelos**:
-   - Obtener todos los vuelos:
-     ```plaintext
-     GET /flights
-     ```
-   - Obtener un vuelo específico:
-     ```plaintext
-     GET /flights/:id
-     ```
+```bash
+python manage.py makemigrations api
+python manage.py migrate
+```
 
-2. **Reservas**:
-   - Crear una reserva (autenticado):
+### Paso 4: Serializadores y Vistas
+
+1. **Crear serializadores** en `api/serializers.py`:
+
+   ```python
+   from rest_framework import serializers
+   from .models import Flight, Reservation
+   from django.contrib.auth.models import User
+
+   class FlightSerializer(serializers.ModelSerializer):
+       class Meta:
+           model = Flight
+           fields = '__all__'
+
+   class ReservationSerializer(serializers.ModelSerializer):
+       class Meta:
+           model = Reservation
+           fields = '__all__'
+
+   class UserSerializer(serializers.ModelSerializer):
+       class Meta:
+           model = User
+           fields = ('username', 'email', 'password')
+       extra_kwargs = {'password': {'write_only': True}}
+
+       def create(self, validated_data):
+           user = User(
+               email=validated_data['email'],
+               username=validated_data['username']
+           )
+           user.set_password(validated_data['password'])
+           user.save()
+           return user
+   ```
+
+2. **Crear vistas** en `api/views.py` para el registro y autenticación:
+
+   ```python
+   from rest_framework import viewsets, status
+   from rest_framework.response import Response
+   from rest_framework.permissions import IsAuthenticated
+   from .models import Flight, Reservation
+   from .serializers import FlightSerializer, ReservationSerializer, UserSerializer
+   from django.contrib.auth.models import User
+   from rest_framework_jwt.settings import api_settings
+   from rest_framework.decorators import action
+
+   class UserViewSet(viewsets.ModelViewSet):
+       queryset = User.objects.all()
+       serializer_class = UserSerializer
+
+       @action(detail=False, methods=['post'])
+       def register(self, request):
+           serializer = UserSerializer(data=request.data)
+           if serializer.is_valid():
+               user = serializer.save()
+               return Response({'user': UserSerializer(user).data}, status=status.HTTP_201_CREATED)
+           return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+   class FlightViewSet(viewsets.ReadOnlyModelViewSet):
+       queryset = Flight.objects.all()
+       serializer_class = FlightSerializer
+
+   class ReservationViewSet(viewsets.ModelViewSet):
+       queryset = Reservation.objects.all()
+       serializer_class = ReservationSerializer
+       permission_classes = [IsAuthenticated]
+
+       def perform_create(self, serializer):
+           serializer.save(user=self.request.user)
+   ```
+
+### Paso 5: Configurar URLs
+
+1. **Configurar las rutas** en `api/urls.py`:
+
+   ```python
+   from django.urls import path, include
+   from rest_framework.routers import DefaultRouter
+   from .views import UserViewSet, FlightViewSet, ReservationViewSet
+   from rest_framework_jwt.views import obtain_jwt_token
+
+   router = DefaultRouter()
+   router.register(r'users', UserViewSet)
+   router.register(r'flights', FlightViewSet)
+   router.register(r'reservations', ReservationViewSet)
+
+   urlpatterns = [
+       path('api/', include(router.urls)),
+       path('api/auth/login/', obtain_jwt_token),
+   ]
+   ```
+
+2. **Incluir las rutas de la aplicación** en `flight_reservation/urls.py`:
+
+   ```python
+   from django.contrib import admin
+   from django.urls import path, include
+
+   urlpatterns = [
+       path('admin/', admin.site.urls),
+       path('', include('api.urls')),
+   ]
+   ```
+
+### Paso 6: Pruebas de la API
+
+Ejecuta el servidor y prueba los endpoints:
+
+1. **Registro de usuario**:
+   ```plaintext
+   POST /api/users/register/
+   Body: { "username": "user1", "email": "user1@example.com", "password": "password123" }
+   ```
+
+2. **Inicio de sesión**:
+   ```plaintext
+   POST /api/auth/login/
+   Body: { "username": "user1", "password": "password123" }
+   ```
+
+3. **Rutas protegidas (Reservas)**:
+   - Crear una reserva:
      ```plaintext
-     POST /reservations
-     Header: Authorization: Bearer <token>
-     Body: { "flightId": 1 }
-     ```
-   - Obtener todas las reservas del usuario (autenticado):
-     ```plaintext
-     GET /reservations
-     Header: Authorization: Bearer <token>
+     POST /api/reservations/
+     Header: Authorization: JWT <token_obtenido_en_login>
+     Body: { "flight": 1, "status": "confirmado" }
      ```
